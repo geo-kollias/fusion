@@ -31,6 +31,19 @@ class FuseContext[T <: Context](val c: T) {
     private def argss_str = argss map (_ mkString ("(", ",", ")")) mkString ""
     override def toString = s"$name$targs_str$argss_str"
   }
+  
+  import Names.{ Map, Filter }
+
+  def fuseCalls(calls: List[Call]): List[Call] = calls match {
+    case Nil              => Nil
+    case x :: Nil         => x :: Nil
+    case Call(Map, _, List(f1) :: _) :: Call(Map, _, List(f2) :: List(cbf) :: _) :: rest =>
+      val andThen = Apply(Select(f1, newTermName("andThen")), List(f2))
+      val fused   = Call(Map, Nil, List(andThen) :: List(cbf) :: Nil)
+      fuseCalls(fused :: rest)
+    case x :: rest => 
+      x :: fuseCalls(rest)
+  }
 
   object PolyCall {
     def unapply(x: Tree): Option[(Tree, Call)] = x match {
@@ -55,23 +68,13 @@ class FuseContext[T <: Context](val c: T) {
     def unapply(x: Tree): Option[(Tree, Call)] = x match {
       case PolyCall(recv, call @ Call(Map | FlatMap, el :: col :: Nil, List(arg :: Nil, cbf :: Nil))) =>
         Some((recv, call)) filter (_ => (arg.tpe <:< Function1Type) && (cbf.tpe <:< CBFType))
-      case MonoCall(recv, call @ Call(Filter | WithFilter, Nil, (arg :: Nil) :: Nil)) =>
+      case MonoCall(recv, call @ Call(Filter | WithFilter, Nil, List(arg :: Nil))) =>
         Some((recv, call)) filter (_ => (arg.tpe <:< Function1Type))
       case _ =>
         None
     }
   }
-  // object MapOp {
-  //   // def apply(fn: Tree, args
-  //   def unapply(x: Tree): Option[(Tree, Tree)] = x match {
-  //     case Apply(Select(fn, FusionName(_)), arg :: Nil)                              => Some((fn, arg))
-  //     case Apply(TypeApply(Select(fn, FusionName(_)), el :: col :: Nil), arg :: Nil) => Some((fn, arg))
-  //     case Apply(fn, arg :: Nil) if arg.tpe <:< CBFType                              => unapply(fn)
-  //     case Apply(Select(fn, _), arg :: Nil)                                          => None
-  //     case Apply(Apply(Select(fn, FusionName(_)), arg :: Nil), cbf :: Nil)           => Some((fn, arg))
-  //     case _                                                                         => showRaw(x) ; None
-  //   }
-  // }
+
   def dump(t: Tree) {
     t foreach (t0 => System.out.println("%-20s %s".format(t0.getClass.getName split '.' last, t0)))
   }
@@ -84,8 +87,11 @@ class FuseContext[T <: Context](val c: T) {
   }
 
   def makeFusionOps[T: c.TypeTag](incoming: c.Expr[T]): c.Expr[FusionOps[T]] = {
-    val (recv, ops) = findFusionOps(incoming.tree)
-    val string      = c.Expr[String](Literal(Constant(recv :: ops mkString "\n  .")))
+    val (recv, ops0) = findFusionOps(incoming.tree)
+    val ops          = fuseCalls(ops0)
+    val s1           = recv :: ops0 mkString "\n  ."
+    val s2           = recv :: ops mkString "\n  ."
+    val string       = c.Expr[String](Literal(Constant(s1 + "\n\n" + s2)))
 
     c.reify(FusionOps(incoming.splice, string.splice))
   }
