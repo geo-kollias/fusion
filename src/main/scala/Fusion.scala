@@ -1,17 +1,17 @@
 package improving
 package fusion
 
-import scala.reflect.makro.Context
-import language.experimental.macros
+import scala.reflect.macros.Context
+import scala.language.experimental.macros
 import scala.collection.{ mutable, immutable, generic }
 import generic.CanBuildFrom
 
 class FuseContext[T <: Context](val c: T) {
   import c.universe._
-  
+
   val CBFType       = typeOf[CanBuildFrom[_,_,_]]
   val Function1Type = typeOf[Function1[_,_]]
-  
+
   object Names {
     val Map        = newTermName("map")
     val Filter     = newTermName("filter")
@@ -31,14 +31,14 @@ class FuseContext[T <: Context](val c: T) {
       val t1 = Select(recv, name)
       val t2 = if (targs.isEmpty) t1 else TypeApply(t1, targs map TypeTree)
       val t3 = argss.foldLeft(t2)((fn, args) => Apply(fn, args))
-     
+
       t3
     }
     private def targs_str = if (targs.isEmpty) "" else targs.mkString("[", ",", "]")
     private def argss_str = argss map (_ mkString ("(", ",", ")")) mkString ""
     override def toString = s"$name$targs_str$argss_str"
   }
-  
+
   import Names.{ Map, Filter }
 
   def fuseCalls(calls: List[Call]): List[Call] = calls match {
@@ -49,16 +49,16 @@ class FuseContext[T <: Context](val c: T) {
       // val and   = Apply(Select(f1, newTermName("&&")), List(f2))
       val f1expr = c.Expr(f1)
       val f2expr = c.Expr(f2)
-      val and = c.reify(improving.fusion.Fusion.and(f1expr.splice, f2expr.splice))
+      val and = reify(improving.fusion.Fusion.and(f1expr.splice, f2expr.splice))
       val fused = Call(Filter, Nil, List(and.tree) :: Nil)
       fuseCalls(fused :: rest)
-      
+
     case Call(Map, _, List(f1) :: _) :: Call(Map, _, List(f2) :: List(cbf) :: _) :: rest =>
       val andThen = Apply(Select(f1, newTermName("andThen")), List(f2))
       val fused   = Call(Map, Nil, List(andThen) :: List(cbf) :: Nil)
       fuseCalls(fused :: rest)
 
-    case x :: rest => 
+    case x :: rest =>
       x :: fuseCalls(rest)
   }
 
@@ -95,7 +95,7 @@ class FuseContext[T <: Context](val c: T) {
   def dump(t: Tree) {
     t foreach (t0 => System.out.println("%-20s %s".format(t0.getClass.getName split '.' last, t0)))
   }
-  
+
   def fuse(t: Tree): Tree = {
     val t1 = t.duplicate
     c.resetAllAttrs(t)
@@ -103,18 +103,18 @@ class FuseContext[T <: Context](val c: T) {
     t1
   }
 
-  def makeFusionOps[T: c.TypeTag](incoming: c.Expr[T]): c.Expr[FusionOps[T]] = {
+  def makeFusionOps[T: c.WeakTypeTag](incoming: c.Expr[T]): c.Expr[FusionOps[T]] = {
     val (recv, ops0) = findFusionOps(incoming.tree)
     val ops          = fuseCalls(ops0)
     val s1           = recv :: ops0 mkString "\n  ."
     val s2           = recv :: ops mkString "\n  ."
     val string       = c.Expr[String](Literal(Constant(s1 + "\n\n" + s2)))
-    
+
     def fused = c.Expr[T](ops.foldLeft(recv)((t, op) => op applyTo t))
 
-    c.reify(FusionOps(fused.splice))  //, string.splice))
+    reify(FusionOps(fused.splice))  //, string.splice))
   }
-  
+
   def findFusionOps(t0: Tree): (Tree, List[Call]) = {
     def loop(t: Tree): (Tree, List[Call]) = t match {
       case FusionCall(t1, call) => loop(t1) match { case (t, cs) => (t, cs :+ call) }
@@ -128,7 +128,7 @@ class FuseContext[T <: Context](val c: T) {
   // lazy val fuse: T = incoming
   // def fuse_show: Unit = println(toString)
 }
-// 
+//
 // class FusionOps[T](incoming: => T, override val toString: String) {
 //   lazy val fuse: T = incoming
 //   def fuse_show: Unit = println(toString)
@@ -136,7 +136,7 @@ class FuseContext[T <: Context](val c: T) {
 
 object FusionOps {
   def and[T](f1: T => Boolean, f2: T => Boolean): T => Boolean = (x: T) => f1(x) && f2(x)
-  
+
   def apply[T](incoming: T): FusionOps[T] =
     new FusionOps[T](incoming)//, "")
   // def apply[T](incoming: T, string: String): FusionOps[T] =
@@ -146,13 +146,13 @@ object FusionOps {
 object Fusion {
   def and[T](f1: T => Boolean, f2: T => Boolean): T => Boolean = (x: T) => f1(x) && f2(x)
   def or[T](f1: T => Boolean, f2: T => Boolean): T => Boolean = (x: T) => f1(x) || f2(x)
-  
+
   implicit class BooleanFunction1Ops[T](val f1: T => Boolean) extends AnyVal {
     def && (f2: T => Boolean): T => Boolean = (x: T) => f1(x) && f2(x)
     def || (f2: T => Boolean): T => Boolean = (x: T) => f1(x) || f2(x)
   }
-  
+
   implicit def addFusionOps[T >: Null](incoming: T): FusionOps[T] = macro addFusionOpsImpl[T]
-  def addFusionOpsImpl[T >: Null : c.TypeTag](c: Context)(incoming: c.Expr[T]): c.Expr[FusionOps[T]] =
+  def addFusionOpsImpl[T >: Null : c.WeakTypeTag](c: Context)(incoming: c.Expr[T]): c.Expr[FusionOps[T]] =
     new FuseContext[c.type](c) makeFusionOps incoming
 }

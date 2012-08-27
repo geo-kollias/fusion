@@ -1,14 +1,14 @@
 package improving
 package fusionbug
 
-import scala.reflect.makro.Context
-import language.experimental.macros
+import scala.reflect.macros.Context
+import scala.language.experimental.macros
 import scala.collection.{ mutable, immutable, generic }
 import generic.CanBuildFrom
 
 class FuseContext[T <: Context](val c: T) {
   import c.universe._
-  
+
   val CBFType       = typeOf[CanBuildFrom[_,_,_]]
   val Function1Type = typeOf[Function1[_,_]]
   val MapName       = newTermName("map")
@@ -23,7 +23,7 @@ class FuseContext[T <: Context](val c: T) {
       case _                            => None
     }
   }
-  
+
   // show(x)
   object TypedMapOp {
     def unapply(x: Tree): Option[(Tree, Call)] = x match {
@@ -47,17 +47,18 @@ class FuseContext[T <: Context](val c: T) {
   def dump(t: Tree) {
     t foreach (t0 => System.out.println("%-20s %s".format(t0.getClass.getName split '.' last, t0)))
   }
-  
+
   def fuse(t: Tree): Tree = t
 
-  def makeFusionOps[T: c.TypeTag](incoming: c.Expr[T]): c.Expr[Op[T]] = {
+  def makeFusionOps[T: c.WeakTypeTag](incoming: c.Expr[T]): c.Expr[Op[T]] = {
+
     val fused  = c.Expr[T](fuse(incoming.tree))
     // val string = c.Expr[String](
     val string = c.Expr[String](Literal(Constant("Incoming: %s\n   Fused: %s".format(show(incoming.tree), show(fused.tree)))))
 
-    c.reify(Op(incoming.splice, string.splice))
+    c.universe.reify(Op(incoming.splice, string.splice))
   }
-  
+
   def mapOps(t0: Tree): (Tree, List[Call]) = {
     def loop(t: Tree): (Tree, List[Call]) = t match {
       case TypedMapOp(t1, call) => loop(t1) match { case (t, cs) => (t, cs :+ call) }
@@ -76,14 +77,14 @@ object Op {
 }
 
 object Fusion {
-  
+
   implicit def method[T >: Null](incoming: T): Op[T] = macro method_impl[T]
-  def method_impl[T >: Null : c.TypeTag](c: Context)(incoming: c.Expr[T]): c.Expr[Op[T]] = {
+  def method_impl[T >: Null : c.WeakTypeTag](c: Context)(incoming: c.Expr[T]): c.Expr[Op[T]] = {
     import c.universe._
-    
+
     val ctx = new FuseContext[c.type](c)
     // import ctx._
-    
+
     // val (t1, ops) = mapOps(incoming.tree)
     // println(s"Found ${ops.size} map operations")
 
