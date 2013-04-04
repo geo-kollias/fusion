@@ -4,7 +4,7 @@ organization := "org.improving"
 
 version := "0.1.1-SNAPSHOT"
 
-scalaVersion := "2.10.0"
+scalaVersion := "2.10.1"
 
 testOptions += Tests.Argument(TestFrameworks.JUnit, "-q", "-v")
 
